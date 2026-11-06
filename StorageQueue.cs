@@ -2,6 +2,8 @@ namespace IslandBar;
 
 enum QueueChoice { Replace, Skip, KeepBoth, Stop }
 
+sealed record StorageUndo(List<StorageTransfer> Moves, RenameStep[]? Renames = null);
+
 sealed class StorageJob(StoragePlan[] plans, int skipped, bool prepare)
 {
     public StoragePlan[] Plans { get; } = plans;
@@ -22,6 +24,7 @@ sealed class StorageQueue(StorageTransfers transfers)
 {
     readonly Queue<StorageJob> _pending = new();
     readonly List<StorageJob> _recent = [];
+    readonly List<StorageUndo> _undo = [];
     TaskCompletionSource<QueueChoice>? _decision;
     bool _running;
     public StorageJob? Active { get; private set; }
@@ -29,6 +32,8 @@ sealed class StorageQueue(StorageTransfers transfers)
     public IReadOnlyList<StorageJob> Recent => _recent;
     public (StoragePlan Plan, StorageConflict Conflict)? Conflict { get; private set; }
     public int Waiting => _pending.Count;
+    public StorageUndo? LastUndo => _undo.LastOrDefault();
+    public string UndoHint { get; private set; } = "Нет действий для отмены. Старые переносы доступны в журнале.";
     public event Action? Changed;
     public event Action<StorageTransfer>? Transferred;
 
@@ -41,6 +46,31 @@ sealed class StorageQueue(StorageTransfers transfers)
     }
 
     public void Resolve(QueueChoice choice) => _decision?.TrySetResult(choice);
+    public void ResetUndo(string hint)
+    {
+        _undo.Clear();
+        UndoHint = hint;
+    }
+
+    void RememberUndo(StorageUndo action)
+    {
+        _undo.Add(action);
+        if (_undo.Count > 30) _undo.RemoveAt(0);
+    }
+
+    public void RememberRename(RenameStep[] steps)
+    {
+        if (steps.Length != 0) RememberUndo(new([], steps));
+    }
+
+    public void FinishUndo(StorageUndo action) => _undo.Remove(action);
+
+    public void MarkUndone(Guid id)
+    {
+        foreach (var action in _undo)
+            action.Moves.RemoveAll(move => move.Id == id);
+        _undo.RemoveAll(action => action.Renames is null && action.Moves.Count == 0);
+    }
     public void StopCurrent()
     {
         if (Active is { } job) job.Stop = true;
@@ -61,6 +91,7 @@ sealed class StorageQueue(StorageTransfers transfers)
     {
         _running = true;
         while (_pending.TryDequeue(out var job)) {
+            var moves = new List<StorageTransfer>();
             Active = job;
             Changed?.Invoke();
             foreach (var original in job.Plans) {
@@ -92,7 +123,15 @@ sealed class StorageQueue(StorageTransfers transfers)
                         else plan = plan with { Replacement = conflict.Replacement };
                     }
                     var result = await Task.Run(() => transfers.Execute(plan));
-                    if (result.Completed) { job.Done++; Transferred?.Invoke(result); }
+                    if (result.Completed) {
+                        job.Done++;
+                        if (result.Move) moves.Add(result);
+                        else {
+                            moves.Clear();
+                            ResetUndo("Копирование можно отменить вручную в папке назначения.");
+                        }
+                        Transferred?.Invoke(result);
+                    }
                     else job.Errors.Add((plan, result.Error ?? result.State,
                         result.RecoveryPath is null && !result.HasReplacedBackup && result.State == "Ошибка"));
                 }
@@ -105,6 +144,7 @@ sealed class StorageQueue(StorageTransfers transfers)
                     Changed?.Invoke();
                 }
             }
+            if (moves.Count != 0) RememberUndo(new(moves));
             _recent.Insert(0, job);
             if (_recent.Count > 12) _recent.RemoveAt(_recent.Count - 1);
             Active = null;

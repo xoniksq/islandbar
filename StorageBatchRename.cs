@@ -20,7 +20,8 @@ static class StorageBatchRename
     {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in steps) {
-            if (!names.Add(item.Target) || File.Exists(item.Target) || Directory.Exists(item.Target))
+            bool samePath = item.Source.Equals(item.Target, StringComparison.OrdinalIgnoreCase);
+            if (!names.Add(item.Target) || !samePath && (File.Exists(item.Target) || Directory.Exists(item.Target)))
                 throw new IOException("Имя уже занято: " + item.Target);
             if (StorageTransfers.GetItemIdentity(item.Source) != item.Identity)
                 throw new IOException("Элемент изменился после проверки: " + item.Source);
@@ -70,6 +71,7 @@ sealed partial class StorageWindow
                 var steps = entries.Select((entry, index) => new RenameStep(entry.Path, targets[index], identities[index]))
                     .Where(step => !step.Source.Equals(step.Target, StringComparison.OrdinalIgnoreCase)).ToArray();
                 StorageBatchRename.Run(steps);
+                _queue.RememberRename(steps);
                 foreach (var step in steps)
                     if (Directory.Exists(step.Target)) _navigation.Relocate(step.Source, step.Target);
                 ShowView("Файлы");

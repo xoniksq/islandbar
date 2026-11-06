@@ -80,6 +80,8 @@ sealed partial class StorageWindow
         }
         finally { SetBusy(false); }
 
+        if (entries.Any(entry => !File.Exists(entry.Path) && !Directory.Exists(entry.Path)))
+            _queue.ResetUndo("Удалённые элементы можно восстановить из корзины Windows.");
         foreach (var pane in _panes) {
             var removed = entries.FirstOrDefault(entry => entry.Folder && StorageTransfers.AtOrBelow(pane.Folder, entry.Path) &&
                 !Directory.Exists(entry.Path));

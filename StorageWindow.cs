@@ -228,8 +228,10 @@ sealed partial class StorageWindow : Window
         Text("Ctrl+T  ·  новая панель       Ctrl+Tab  ·  следующая панель", 13, wrap: true),
         Text("Ctrl+W  ·  закрыть панель       Ctrl+Shift+T  ·  вернуть закрытую", 13, wrap: true),
         Text("Ctrl+L  ·  адрес       Ctrl+F  ·  поиск       Ctrl+I  ·  фильтр", 13, wrap: true),
+        Text("Alt+D  ·  адрес       Alt+P  ·  предпросмотр       Ctrl+R  ·  обновить", 13, wrap: true),
         Text("F2  ·  переименовать       F5  ·  обновить       F3  ·  предпросмотр", 13, wrap: true),
         Text("Ctrl+C / X / V  ·  копировать, вырезать и вставить", 13, wrap: true),
+        Text("Ctrl+Z  ·  отменить последний перенос или переименование       F1  ·  помощь", 13, wrap: true),
         Text("Delete  ·  отправить выбранное в корзину", 13, wrap: true),
         Text("Зажми ЛКМ и перетащи на папку, панель или её вкладку. Ctrl при сбросе — копирование.", 13, PanelControls.Secondary, wrap: true)
     }});

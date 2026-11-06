@@ -189,17 +189,65 @@ sealed partial class StorageWindow
         SetBusy(true);
         Status("Проверяю перед возвратом…");
         try {
-            var result = await Task.Run(() => _transfers.Undo(transfer.Id));
+            var result = await RestoreTransfer(transfer);
             message = result.Completed ? transfer.IsFolder ? "Папка возвращена." : "Файл возвращён." : result.Error ?? result.State;
-            if (result.Completed && result.IsFolder) {
+        }
+        catch (Exception ex) { message = ex.Message; }
+        finally { SetBusy(false); }
+        ShowView("Журнал");
+        Status(message);
+    }
+
+    async Task<StorageTransfer> RestoreTransfer(StorageTransfer transfer)
+    {
+        var result = await Task.Run(() => _transfers.Undo(transfer.Id));
+        if (result.Completed) {
+            _queue.MarkUndone(transfer.Id);
+            if (result.IsFolder) {
                 _navigation.Relocate(result.Source, result.Destination);
                 ScheduleSave();
             }
             _inbox = null;
         }
-        catch (Exception ex) { message = ex.Message; }
-        finally { SetBusy(false); }
-        ShowView("Журнал");
+        return result;
+    }
+
+    async Task UndoLatest()
+    {
+        if (_busy) return;
+        if (_queue.Active is not null) { Status("Отмена доступна после завершения очереди."); return; }
+        if (_queue.LastUndo is not { } action) { Status(_queue.UndoHint); return; }
+        SetBusy(true);
+        Status("Проверяю перед отменой…");
+        int done = 0;
+        string message;
+        try {
+            if (action.Renames is { } renamed) {
+                var reverse = renamed.Reverse().Select(item => new RenameStep(item.Target, item.Source, item.Identity)).ToArray();
+                await Task.Run(() => StorageBatchRename.Run(reverse));
+                foreach (var item in reverse)
+                    if (Directory.Exists(item.Target)) _navigation.Relocate(item.Source, item.Target);
+                _queue.FinishUndo(action);
+                ScheduleSave();
+                message = $"Прежние имена возвращены · {reverse.Length}";
+            } else {
+                foreach (var transfer in action.Moves.ToArray().Reverse()) {
+                    var result = await RestoreTransfer(transfer);
+                    if (!result.Completed) throw new IOException(result.Error ?? result.State);
+                    done++;
+                }
+                message = $"Перенос отменён · {done}";
+            }
+        }
+        catch (Exception ex) {
+            message = (done == 0 ? "Отмена остановлена. " : $"Возвращено · {done}. ") + ex.Message;
+        }
+        finally {
+            SetBusy(false);
+            _inbox = null;
+            ArrangePanes(refresh: true);
+            _active.Items.Focus();
+        }
         Status(message);
     }
 

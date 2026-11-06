@@ -117,12 +117,24 @@ sealed partial class StorageWindow
         if (_busy) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var modifiers = Keyboard.Modifiers;
-        if (key == Key.F5 && modifiers == ModifierKeys.None) { e.Handled = true; Refresh(); return; }
-        if (!ReferenceEquals(_page.Content, _files) || _overlay is not null) return;
-        if (modifiers == ModifierKeys.Alt && key is Key.Left or Key.Right or Key.Up) {
+        if (key == Key.F5 && modifiers == ModifierKeys.None ||
+            key == Key.R && modifiers == ModifierKeys.Control && Keyboard.FocusedElement is not TextBoxBase) {
             e.Handled = true;
-            if (key == Key.Up) GoUp(_active);
-            else Step(_active, key == Key.Left ? -1 : 1);
+            Refresh();
+            return;
+        }
+        if (key == Key.F1 && modifiers == ModifierKeys.None && _overlay is null) { e.Handled = true; ShowHelp(); return; }
+        if (!ReferenceEquals(_page.Content, _files) || _overlay is not null) return;
+        if (modifiers == ModifierKeys.Alt) {
+            switch (key) {
+                case Key.D: EditAddress(_active); break;
+                case Key.P: PreviewSelection(_active); break;
+                case Key.Up: GoUp(_active); break;
+                case Key.Left: Step(_active, -1); break;
+                case Key.Right: Step(_active, 1); break;
+                default: return;
+            }
+            e.Handled = true;
             return;
         }
         if (modifiers == (ModifierKeys.Control | ModifierKeys.Shift)) {
@@ -144,6 +156,9 @@ sealed partial class StorageWindow
                 case Key.F: _search.Focus(); _search.SelectAll(); break;
                 case Key.I: _active.Filter.Focus(); _active.Filter.SelectAll(); break;
                 case Key.D: PinFolders([SelectedFolderOrCurrent(_active)]); break;
+                case Key.Z when Keyboard.FocusedElement is not TextBoxBase:
+                    if (!e.IsRepeat) _ = UndoLatest();
+                    break;
                 case Key.A when _active.Items.IsKeyboardFocusWithin: _active.Items.SelectAll(); break;
                 case Key.C when Keyboard.FocusedElement is not TextBoxBase: CopyToClipboard(Selected(_active), false); break;
                 case Key.X when Keyboard.FocusedElement is not TextBoxBase: CopyToClipboard(Selected(_active), true); break;
@@ -217,6 +232,7 @@ sealed partial class StorageWindow
             var selected = Selected(pane);
             if (selected.Length == 0) {
                 AddMenuItem(menu, "Вставить · Ctrl+V", Paste);
+                AddMenuItem(menu, "Отменить действие · Ctrl+Z", () => _ = UndoLatest());
                 AddMenuItem(menu, "Новая папка", () => ShowNewFolder(pane));
                 AddMenuItem(menu, "Обновить · F5", Refresh);
                 return;
@@ -238,6 +254,7 @@ sealed partial class StorageWindow
             AddMenuItem(menu, "Копировать · Ctrl+C", () => CopyToClipboard(selected, false));
             AddMenuItem(menu, "Вырезать · Ctrl+X", () => CopyToClipboard(selected, true));
             AddMenuItem(menu, "Вставить в эту панель · Ctrl+V", Paste);
+            AddMenuItem(menu, "Отменить действие · Ctrl+Z", () => _ = UndoLatest());
             menu.Items.Add(new Separator());
             AddMenuItem(menu, "В корзину · Delete", () => RecycleSelection(selected));
         };
@@ -359,10 +376,12 @@ sealed partial class StorageWindow
     }
 
     void ShowNewFolder(BrowserPane pane) => ShowNameEditor("Новая папка", pane.Folder, "", 0, "Создать", name => {
+        if (_queue.Active is not null) throw new IOException("Создание папки доступно после завершения очереди.");
         string path = Path.Combine(pane.Folder, name);
         if (!Directory.Exists(pane.Folder)) throw new DirectoryNotFoundException("Исходная папка недоступна.");
         if (Directory.Exists(path) || File.Exists(path)) throw new IOException("Такое имя уже занято.");
         Directory.CreateDirectory(path);
+        _queue.ResetUndo("Последнее действие — создание папки.");
         Navigate(pane, path);
         Status("Папка создана.");
     });
@@ -371,6 +390,7 @@ sealed partial class StorageWindow
         string identity = StorageTransfers.GetItemIdentity(entry.Path);
         int selection = entry.Folder ? entry.Name.Length : Path.GetFileNameWithoutExtension(entry.Name).Length;
         ShowNameEditor("Переименовать", entry.Path, entry.Name, selection, "Сохранить имя", name => {
+            if (_queue.Active is not null) throw new IOException("Переименование доступно после завершения очереди.");
             string parent = Path.GetDirectoryName(entry.Path)!;
             string target = Path.Combine(parent, name);
             if (target == entry.Path) { ShowView("Файлы"); return; }
@@ -379,6 +399,7 @@ sealed partial class StorageWindow
             if (!target.Equals(entry.Path, StringComparison.OrdinalIgnoreCase) && (File.Exists(target) || Directory.Exists(target)))
                 throw new IOException("Такое имя уже занято.");
             StorageTransfers.RenamePath(entry.Path, target);
+            _queue.RememberRename([new(entry.Path, target, identity)]);
             if (entry.Folder) _navigation.Relocate(entry.Path, target);
             Navigate(pane, parent, target);
             Status("Имя изменено.");
