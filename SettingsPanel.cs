@@ -49,10 +49,14 @@ sealed partial class IslandWindow
             on=>SavePreferences(_preferences with {ClickToMinimize=on})));
         body.Children.Add(SettingsToggle("Привязки Win к островку",_preferences.ShellShortcuts,
             on=>SavePreferences(_preferences with {ShellShortcuts=on})));
-        body.Children.Add(SettingsToggle("Запускать при входе в Windows",Startup.Enabled,on=>{
+        var autostart = SettingsToggle("Запускать при входе в Windows",false,on=>{
             try{Program.SetAutostart(on);return true;}
             catch(Exception ex){PanelError("Не удалось изменить автозапуск");Program.Log("settings startup: "+ex.Message);return false;}
-        }));
+        });
+        autostart.IsEnabled = false;
+        autostart.ToolTip = PanelControls.Hint("Проверяю состояние автозапуска…");
+        ToolTipService.SetShowOnDisabled(autostart, true);
+        body.Children.Add(autostart);
         AddUpdateSettings(body);
 
         body.Children.Add(SettingsHeading("ВНЕШНИЙ ВИД"));
@@ -72,6 +76,15 @@ sealed partial class IslandWindow
         var footer=LeftLabel("Изменения сохраняются сразу",11,Secondary);
         footer.Margin=new Thickness(0,12,0,0);column.Children.Add(footer);
         OpenCard("settings",column);
+        if (_featureKind == "settings") _ = LoadAutostartSetting(autostart);
+    }
+
+    static async Task LoadAutostartSetting(CheckBox check)
+    {
+        var enabled = await Task.Run(() => Startup.Enabled);
+        check.IsChecked = enabled == true;
+        check.IsEnabled = enabled.HasValue;
+        check.ToolTip = enabled.HasValue ? null : PanelControls.Hint("Планировщик Windows недоступен.");
     }
 
     static TextBlock SettingsHeading(string title,int top=14)

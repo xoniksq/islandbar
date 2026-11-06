@@ -26,13 +26,34 @@ static class Startup
             SHChangeNotify(existed?0x2000u:2u,0x1005,ReturnShortcut,0);
         }finally{Marshal.ReleaseComObject(shell);}
     }
-    public static bool Enabled
+    static object? FindTask(object folder, string name)
     {
-        get {
-            dynamic service=Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;
-            try {service.Connect();return service.GetFolder(@"\").GetTask(TaskName).Enabled;}
-            catch(COMException){return false;}
-            finally{Marshal.ReleaseComObject(service);}
+        try { return ((dynamic)folder).GetTask(name); }
+        catch (Exception ex) when (ex.HResult == unchecked((int)0x80070002)) { return null; }
+    }
+
+    public static bool? Enabled => ReadEnabled(TaskName);
+
+    static bool? ReadEnabled(string name)
+    {
+        object? service = null, folder = null, task = null;
+        try {
+            var type = Type.GetTypeFromProgID("Schedule.Service", throwOnError: true)!;
+            service = Activator.CreateInstance(type)!;
+            var scheduler = (dynamic)service;
+            scheduler.Connect();
+            folder = scheduler.GetFolder(@"\");
+            task = FindTask(folder!, name);
+            return task is not null && (bool)((dynamic)task).Enabled;
+        }
+        catch (Exception ex) {
+            Program.Log("startup state: " + ex.Message);
+            return null;
+        }
+        finally {
+            if (task is not null) Marshal.ReleaseComObject(task);
+            if (folder is not null) Marshal.ReleaseComObject(folder);
+            if (service is not null) Marshal.ReleaseComObject(service);
         }
     }
     public static void Configure(bool enabled)
@@ -40,7 +61,15 @@ static class Startup
         dynamic service=Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;
         try {
             service.Connect();dynamic folder=service.GetFolder(@"\");
-            if(!enabled){try{folder.GetTask(TaskName).Enabled=false;}catch(COMException){}return;}
+            if(!enabled){
+                try{
+                    if(FindTask((object)folder, TaskName) is { } registered){
+                        try{((dynamic)registered).Enabled=false;}
+                        finally{Marshal.ReleaseComObject(registered);}
+                    }
+                }catch(COMException){}
+                return;
+            }
             dynamic task=service.NewTask(0);
             string user=WindowsIdentity.GetCurrent().User!.Value;
             task.RegistrationInfo.Description="IslandBar — независимый запуск островка при входе в Windows";
