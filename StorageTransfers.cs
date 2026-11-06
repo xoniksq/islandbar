@@ -187,12 +187,25 @@ sealed partial class StorageTransfers(string journal)
         return new(existing, identity == plan.ExpectedFileIdentity ? null : new(identity, existing.Modified, existing.Bytes));
     }
 
-    public static StoragePlan KeepBoth(StoragePlan plan)
+    public static StoragePlan KeepBoth(StoragePlan plan) => WithUniqueName(plan, "", 2);
+
+    public static StoragePlan NamePastedCopy(StoragePlan plan)
+    {
+        var original = plan with { DestinationName = null };
+        if (original.BlockReason is null) return original;
+        bool samePath = string.Equals(original.Source.Path, original.Destination, StringComparison.OrdinalIgnoreCase);
+        if (!samePath && original.InvalidReason is not null) return original;
+        return samePath ? WithUniqueName(original, " — копия", 0) : WithUniqueName(original, "", 1);
+    }
+
+    static StoragePlan WithUniqueName(StoragePlan plan, string suffix, int first)
     {
         string extension = plan.Source.Folder ? "" : Path.GetExtension(plan.Source.Name);
-        string stem = plan.Source.Name[..(plan.Source.Name.Length - extension.Length)];
-        for (int i = 2; i < 10000; i++) {
-            var candidate = plan with { DestinationName = $"{stem} ({i}){extension}", Replacement = null };
+        string stem = plan.Source.Name[..(plan.Source.Name.Length - extension.Length)] + suffix;
+        for (int i = first; i < 10000; i++) {
+            string number = i == 0 ? "" : $" ({i})";
+            var candidate = plan with { DestinationName = stem + number + extension, Replacement = null };
+            if (candidate.InvalidReason is { } invalid) throw new IOException(invalid);
             if (candidate.BlockReason is null) return candidate;
         }
         throw new IOException("Не удалось подобрать свободное имя.");

@@ -294,7 +294,7 @@ sealed partial class StorageWindow
             string[] paths = StorageSelection.Normalize(entries).Select(entry => entry.Path).ToArray();
             var data = FileTransferData(paths, move);
             Clipboard.SetDataObject(data, copy: true);
-            Status($"{(move ? "Вырезано" : "Скопировано в буфер")} · {paths.Length}. Выбери папку и нажми Ctrl+V.");
+            Status($"{(move ? "Вырезано" : "Скопировано в буфер")} · {paths.Length}. ПКМ → Вставить или Ctrl+V.");
         });
     }
 
@@ -321,22 +321,26 @@ sealed partial class StorageWindow
     void Paste()
     {
         if (_busy) return;
-        Try(() => {
-            var data = Clipboard.GetDataObject();
-            if (data?.GetData(DataFormats.FileDrop) is not string[] paths || paths.Length == 0) {
-                Status("В буфере нет файлов или папок.");
-                return;
-            }
-            if (!CheckBatchSize(paths.Length)) return;
-            bool move = ClipboardRequestsMove(data);
-            var entries = paths.Where(Path.IsPathFullyQualified).Select(path => {
-                string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-                if (Directory.Exists(full)) return StorageCatalog.Entry(new DirectoryInfo(full));
-                if (File.Exists(full)) return StorageCatalog.Entry(new FileInfo(full));
-                return new StorageEntry(Path.GetFileName(full), full, false, 0, DateTime.MinValue, 0);
-            }).ToArray();
-            ShowPlan(StorageSelection.ToPlans(entries, _active.Folder, move));
-        });
+        Try(() => PasteFiles(Clipboard.GetDataObject()));
+    }
+
+    void PasteFiles(IDataObject? data)
+    {
+        if (data?.GetData(DataFormats.FileDrop) is not string[] paths || paths.Length == 0) {
+            Status("В буфере нет файлов или папок.");
+            return;
+        }
+        if (!CheckBatchSize(paths.Length)) return;
+        bool move = ClipboardRequestsMove(data);
+        var entries = paths.Where(Path.IsPathFullyQualified).Select(path => {
+            string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            if (Directory.Exists(full)) return StorageCatalog.Entry(new DirectoryInfo(full));
+            if (File.Exists(full)) return StorageCatalog.Entry(new FileInfo(full));
+            return new StorageEntry(Path.GetFileName(full), full, false, 0, DateTime.MinValue, 0);
+        }).ToArray();
+        var plans = StorageSelection.ToPlans(entries, _active.Folder, move);
+        if (move) ShowPlan(plans);
+        else _ = Execute(plans, 0, prepare: true, nameCopies: true);
     }
 
     bool CheckBatchSize(int count)
@@ -596,7 +600,7 @@ sealed partial class StorageWindow
     {
         if (plans.Length == 0 || _busy || !CheckBatchSize(plans.Length)) return;
         if (plans[0].Move) {
-            await Execute(plans, 0, prepareMove: true);
+            await Execute(plans, 0, prepare: true);
             return;
         }
         int revision = ++_pageRevision;
@@ -640,12 +644,12 @@ sealed partial class StorageWindow
             : $"Доступно · {valid.Length}. Пропущено · {skipped}. Причины указаны в списке.");
     }
 
-    Task Execute(StoragePlan[] plans, int skipped, bool prepareMove = false)
+    Task Execute(StoragePlan[] plans, int skipped, bool prepare = false, bool nameCopies = false)
     {
         if (_busy || plans.Length == 0) return Task.CompletedTask;
         _inbox = null;
         ShowView("Файлы");
-        _queue.Enqueue(plans, skipped, prepareMove);
+        _queue.Enqueue(plans, skipped, prepare, nameCopies);
         return Task.CompletedTask;
     }
 }

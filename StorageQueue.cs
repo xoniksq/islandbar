@@ -4,11 +4,12 @@ enum QueueChoice { Replace, Skip, KeepBoth, Stop }
 
 sealed record StorageUndo(List<StorageTransfer> Moves, RenameStep[]? Renames = null);
 
-sealed class StorageJob(StoragePlan[] plans, int skipped, bool prepare)
+sealed class StorageJob(StoragePlan[] plans, int skipped, bool prepare, bool nameCopies)
 {
     public StoragePlan[] Plans { get; } = plans;
     public int Skipped { get; set; } = skipped;
     public bool Prepare { get; } = prepare;
+    public bool NameCopies { get; } = nameCopies;
     public int Finished { get; set; }
     public int Done { get; set; }
     public long Bytes { get; set; } = plans.Where(p => !p.Source.Folder).Sum(p => p.Source.Bytes);
@@ -37,10 +38,10 @@ sealed class StorageQueue(StorageTransfers transfers)
     public event Action? Changed;
     public event Action<StorageTransfer>? Transferred;
 
-    public void Enqueue(StoragePlan[] plans, int skipped, bool prepare)
+    public void Enqueue(StoragePlan[] plans, int skipped, bool prepare, bool nameCopies = false)
     {
         if (plans.Length == 0) return;
-        _pending.Enqueue(new StorageJob(plans, skipped, prepare));
+        _pending.Enqueue(new StorageJob(plans, skipped, prepare, nameCopies));
         if (!_running) _ = Run();
         else Changed?.Invoke();
     }
@@ -84,7 +85,7 @@ sealed class StorageQueue(StorageTransfers transfers)
         var retry = previous.Errors.Where(row => row.Retry).Select(row => row.Plan with { Replacement = null }).ToArray();
         if (retry.Length == 0) return;
         previous.Retried = true;
-        Enqueue(retry, 0, true);
+        Enqueue(retry, 0, true, previous.NameCopies);
     }
 
     async Task Run()
@@ -102,7 +103,10 @@ sealed class StorageQueue(StorageTransfers transfers)
                 Changed?.Invoke();
                 try {
                     if (job.Prepare) {
-                        var check = await Task.Run(() => StorageSelection.Check([plan], allowConflicts: true)[0]);
+                        var check = await Task.Run(() => {
+                            var candidate = job.NameCopies && !plan.Move ? StorageTransfers.NamePastedCopy(plan) : plan;
+                            return StorageSelection.Check([candidate], allowConflicts: plan.Move)[0];
+                        });
                         if (check.Error is { } error) throw new IOException(error);
                         plan = check.Plan;
                     }
