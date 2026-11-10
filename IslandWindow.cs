@@ -492,6 +492,7 @@ sealed partial class IslandWindow : Window
         ClosePreview();
         if (!IsVisible) Show();
         if (!_preview) Native.SetTaskbarVisible(false);
+        KeepDockOnTop(raise: true);
         if (_expanded) return;
         _expanded = true;
         if(_preferences.WindowPreviews)_previewTimer.Start();
@@ -581,6 +582,21 @@ sealed partial class IslandWindow : Window
         UpdateHitArea();
     }
 
+    void KeepDockOnTop(bool raise = false)
+    {
+        if (_preview || _fullscreen || _handle == 0 || !IsVisible || _trayOpening) return;
+        if (!raise) {
+            if (!_expanded || _hitRect.IsEmpty || _openMenus.Count != 0 || _featurePopup.IsOpen ||
+                _startMenu is not null || _storageWindow is not null || _windowPreview is not null) return;
+            int x = (int)(_hitRect.Left + _hitRect.Width / 2);
+            int y = (int)(_hitRect.Top + 5);
+            bool Covered(int px) => Native.IsApplicationWindow(Native.WindowFromPoint(new Native.Point { X = px, Y = y }));
+            if (!Covered(x) && !Covered(x - (int)(_hitRect.Width / 4)) && !Covered(x + (int)(_hitRect.Width / 4))) return;
+        }
+        const uint keepSizePositionAndFocus = 0x0001 | 0x0002 | 0x0010;
+        Native.SetWindowPos(_handle, -1, 0, 0, 0, 0, keepSizePositionAndFocus);
+    }
+
     Rect DockDisplayArea()
     {
         var display = Native.Display(_handle);
@@ -629,6 +645,7 @@ sealed partial class IslandWindow : Window
     void CloseMenus(){foreach(var menu in _openMenus.Keys.ToArray())menu.IsOpen=false;}
     void OutsideClick(int x,int y)
     {
+        if (_startMenu?.ConfirmingPower == true) return;
         if (_storageWindow is { } storage && storage.ContainsScreenPoint(x,y)) return;
         if(InsideFeature(x,y)||InsidePreview(x,y)||InsideStartMenu(x,y)||InsideNativeTrayMenu(x,y))return;
         foreach(var window in _openMenus.Values)
@@ -722,6 +739,7 @@ sealed partial class IslandWindow : Window
             FeatureTick();
             TickUpdates();
             if (_closing) return;
+            KeepDockOnTop();
             if (!_preview && !_trayOpening) Native.SetTaskbarVisible(false);
             if (++_ticks % 2 == 0) _ = RefreshAppsAsync();
             if (_expanded) UpdateIndicators();

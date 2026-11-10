@@ -32,6 +32,9 @@ sealed partial class IslandWindow
     Button? _musicPreviousButton,_musicPlayButton,_musicNextButton;
     Image? _musicCover;
     Slider? _musicPosition,_volumeSlider;
+    Slider? _musicVolume;
+    TextBlock? _musicVolumeText;
+    string? _musicVolumeKey;
     TextBlock? _volumeNumber,_volumeName,_muteLabel;
     StackPanel? _outputs;
     string _outputKey="";
@@ -183,6 +186,20 @@ sealed partial class IslandWindow
         var next=PanelControls.Button(Glyph("\uE893",20),"Следующий трек",44,true);next.Width=52;next.Click+=async(_,_)=>await MusicCommand("next");controls.Children.Add(next);column.Children.Add(controls);
         _musicPreviousButton=previous;_musicPlayButton=play;_musicNextButton=next;
         previous.ToolTip=PanelControls.Hint("Предыдущий трек");play.ToolTip=PanelControls.Hint("Пауза или воспроизведение");next.ToolTip=PanelControls.Hint("Следующий трек");
+        var volume=new DockPanel {Margin=new Thickness(0,4,0,5)};
+        var speaker=Glyph("\uE767",16);speaker.Margin=new Thickness(0,0,8,0);
+        DockPanel.SetDock(speaker,Dock.Left);volume.Children.Add(speaker);
+        _musicVolumeText=LeftLabel("—",11,Secondary);_musicVolumeText.Width=38;
+        DockPanel.SetDock(_musicVolumeText,Dock.Right);volume.Children.Add(_musicVolumeText);
+        _musicVolume=new Slider {Minimum=0,Maximum=100,Height=25,IsMoveToPointEnabled=true,Template=PanelControls.Slider,Foreground=Accent,IsEnabled=false};
+        System.Windows.Automation.AutomationProperties.SetName(_musicVolume,"Громкость музыкального приложения");
+        _musicVolume.ValueChanged+=(_,_)=>{
+            if(_panelUpdating||_musicVolumeKey is not { } key)return;
+            int value=(int)Math.Round(_musicVolume.Value);
+            try{AppMixer.SetVolume(key,value);_musicVolumeText.Text=$"{value}%";}
+            catch(Exception ex){Program.Log("music volume: "+ex.Message);PanelError("Не удалось изменить громкость плеера.");}
+        };
+        volume.Children.Add(_musicVolume);column.Children.Add(volume);
         var apps=new System.Windows.Controls.Primitives.UniformGrid {Columns=2,Margin=new Thickness(-3,4,-3,0)};
         foreach(string provider in new[]{MusicService.Spotify,MusicService.YandexMusic}){
             var open=PanelControls.Button(provider,"Открыть "+provider,34,true);
@@ -248,9 +265,32 @@ sealed partial class IslandWindow
         _musicPlayButton!.IsEnabled=track?.CanToggle==true;
         _musicNextButton!.IsEnabled=track?.CanNext==true;
         _panelUpdating=true;
-        try{if(!_musicPosition!.IsMouseCaptureWithin){_musicPosition.Maximum=Math.Max(1,track?.Duration??1);_musicPosition.Value=track?.Position??0;}_musicPosition.IsEnabled=track?.CanSeek==true;}
+        try{
+            if(!_musicPosition!.IsMouseCaptureWithin){_musicPosition.Maximum=Math.Max(1,track?.Duration??1);_musicPosition.Value=track?.Position??0;}
+            _musicPosition.IsEnabled=track?.CanSeek==true;
+            UpdateMusicVolume(track?.Provider);
+        }
         finally{_panelUpdating=false;}
         _musicTime!.Text=track is {Duration:>0}?TrackTime(track.Position)+"  /  "+TrackTime(track.Duration):"—";
+    }
+    static bool MatchesMusicVolume(string? provider,string key) => provider switch {
+        MusicService.Spotify => key.Equals("Spotify",StringComparison.OrdinalIgnoreCase),
+        MusicService.YandexMusic => key.ToLowerInvariant() is "яндекс музыка" or "yandexmusic" or "yandex music",
+        _ => false
+    };
+    void UpdateMusicVolume(string? provider)
+    {
+        if(_musicVolume is null||_musicVolume.IsMouseCaptureWithin)return;
+        MixerApp? app=null;
+        try{if(provider is not null)app=AppMixer.Read().FirstOrDefault(item=>MatchesMusicVolume(provider,item.Key));}
+        catch(Exception ex){Program.Log("music volume state: "+ex.Message);}
+        _musicVolumeKey=app?.Key;
+        _musicVolume.IsEnabled=app is not null;
+        _musicVolumeText!.Text=app is null?"—":$"{app.Volume}%";
+        if(app is not null)_musicVolume.Value=app.Volume;
+        var hint=app is null?"Громкость доступна, когда Spotify или Яндекс.Музыка создаст аудиосессию.":"Громкость · "+provider;
+        _musicVolume.ToolTip=PanelControls.Hint(hint);
+        ToolTipService.SetShowOnDisabled(_musicVolume,true);
     }
     void OpenSound()
     {

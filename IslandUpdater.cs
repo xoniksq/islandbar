@@ -27,9 +27,28 @@ static class IslandUpdater
 
     static HttpClient CreateClient()
     {
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("IslandBar-Updater/1.0");
         return client;
+    }
+
+    static async Task<HttpResponseMessage> GetResponse(HttpClient client, Uri url, CancellationToken token)
+    {
+        for (int attempt = 0; ; attempt++) {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(45));
+            try {
+                var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                int code = (int)response.StatusCode;
+                if (attempt != 0 || code is not (408 or 429 or >= 500)) return response;
+                response.Dispose();
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested) {
+                if (attempt != 0) throw new TimeoutException("GitHub не ответил вовремя.");
+            }
+            catch (HttpRequestException) when (attempt == 0 && !token.IsCancellationRequested) { }
+            await Task.Delay(TimeSpan.FromSeconds(2), token);
+        }
     }
 
     static Version? ParseVersion(string? value)
@@ -64,10 +83,11 @@ static class IslandUpdater
     public static async Task<string?> CheckAsync()
     {
         if (ReadPending(Stage, CurrentVersion) is { } pending) return pending.Version;
-        using var response = await Http.GetAsync($"https://github.com/{Repository}/releases/latest/download/islandbar-update.json");
+        using var checkTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(105));
+        using var response = await GetResponse(Http, new Uri($"https://github.com/{Repository}/releases/latest/download/islandbar-update.json"), checkTimeout.Token);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
-        using var release = JsonDocument.Parse(await response.Content.ReadAsStreamAsync());
+        using var release = JsonDocument.Parse(await response.Content.ReadAsStringAsync(checkTimeout.Token));
         if (GetAsset(release.RootElement) is not { } asset || asset.Version <= CurrentVersion) return null;
         string version = asset.Version.ToString(3);
         if (File.Exists(Rejected(Stage)) && File.ReadAllText(Rejected(Stage)).Trim() == version) return null;
@@ -92,7 +112,7 @@ static class IslandUpdater
 
     static async Task Download(ReleaseAsset asset, string path, CancellationToken token)
     {
-        using var response = await Http.GetAsync(asset.Url, HttpCompletionOption.ResponseHeadersRead, token);
+        using var response = await GetResponse(Http, asset.Url, token);
         response.EnsureSuccessStatusCode();
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         await using var input = await response.Content.ReadAsStreamAsync(token);

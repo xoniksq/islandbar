@@ -42,7 +42,7 @@ sealed partial class IslandWindow
             Math.Clamp(left,area.Left+12,area.Right-width-12),
             Math.Max(area.Top+12,bottom-height),width,height);
 
-        var page=new StartMenuPage(bounds,StartFavorites(pinned),StartShortcuts(),pinned,()=>Collapse(),OpenSettings);
+        var page=new StartMenuPage(bounds,StartFavorites(pinned),StartShortcuts(),pinned,()=>Collapse(),OpenSettings,TrackMenu);
         var menu=new SearchWindow(_preview||_inspect,page);
         _startMenu=menu;
         UpdatePanelMarker();

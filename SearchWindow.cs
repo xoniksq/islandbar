@@ -16,9 +16,10 @@ sealed record StartMenuPage(
     UIElement Shortcuts,
     IReadOnlyList<DockApp> Pinned,
     Action AfterLaunch,
-    Action OpenSettings);
+    Action OpenSettings,
+    Action<ContextMenu> TrackContextMenu);
 
-sealed class SearchWindow:Window
+sealed partial class SearchWindow:Window
 {
     readonly TextBox _query=new() {FontSize=17,Foreground=Brushes.White,Background=Brushes.Transparent,
         BorderThickness=new Thickness(0),CaretBrush=PanelControls.Silver,SelectionBrush=PanelControls.Silver,
@@ -72,6 +73,10 @@ sealed class SearchWindow:Window
         var divider=new Border {Background=PanelControls.Outline,Height=1};
         DockPanel.SetDock(divider,Dock.Top);footer.Children.Add(divider);
         var footerLine=new DockPanel {Margin=new Thickness(0,8,0,0)};
+        if(start is not null){
+            var power=BuildPowerButton();
+            DockPanel.SetDock(power,Dock.Right);footerLine.Children.Add(power);
+        }
         _hint.Margin=new Thickness(0);_hint.VerticalAlignment=VerticalAlignment.Center;
         DockPanel.SetDock(_keyHints,Dock.Right);footerLine.Children.Add(_keyHints);
         footerLine.Children.Add(_hint);footer.Children.Add(footerLine);

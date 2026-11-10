@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Net.Http;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -33,6 +35,12 @@ sealed partial class IslandWindow
         _updateHint.TextWrapping = TextWrapping.Wrap;
         _updateHint.Margin = new Thickness(3, 5, 3, 0);
         panel.Children.Add(_updateButton);
+        var releases=PanelControls.Button("Открыть релизы GitHub","Открыть релизы GitHub");
+        releases.Click+=(_,_)=>{
+            try{Process.Start(new ProcessStartInfo("https://github.com/xoniksq/islandbar/releases/latest"){UseShellExecute=true})?.Dispose();}
+            catch(Exception ex){Program.Log("open releases: "+ex.Message);PanelError("Не удалось открыть GitHub.");}
+        };
+        panel.Children.Add(releases);
         panel.Children.Add(_updateHint);
         UpdateUpdateControls();
     }
@@ -76,7 +84,14 @@ sealed partial class IslandWindow
         }
         catch (Exception ex) {
             _nextUpdateCheck = DateTime.UtcNow.AddMinutes(30);
-            _updateStatus = "GitHub или сборка пока недоступны. Проверю позже.";
+            _updateStatus = ex switch {
+                TimeoutException or OperationCanceledException => "GitHub или загрузка не ответили вовремя. Проверю позже.",
+                HttpRequestException { StatusCode: { } code } => $"GitHub ответил ошибкой {(int)code}. Проверю позже.",
+                HttpRequestException => "Не удалось подключиться к GitHub. Проверю позже.",
+                UnauthorizedAccessException => "Нет доступа на запись в папку островка.",
+                IOException => "Не удалось сохранить или проверить сборку. Подробности в log.txt.",
+                _ => "Не удалось проверить обновления. Подробности в log.txt."
+            };
             Program.Log("update check: " + ex.Message);
             if (interactive && _featureKind == "settings") PanelError(_updateStatus);
         }
