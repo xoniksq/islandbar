@@ -335,7 +335,13 @@ sealed partial class IslandWindow : Window
     nint Hook(nint window, int message, nint wparam, nint lparam, ref bool handled)
     {
         if(message==0x0021&&!_inspect&&!_preview)return KeepForeground(window,message,wparam,lparam,ref handled);
-        if(message==0x0084&&Native.GetCursorPos(out var point)&&!InsideCapsule(point.X,point.Y)){handled=true;return -1;}
+        if (message == 0x0084) { // WM_NCHITTEST carries the screen point being tested.
+            long point = lparam.ToInt64();
+            if (!InsideCapsule(unchecked((short)point), unchecked((short)(point >> 16)))) {
+                handled = true;
+                return -1;
+            }
+        }
         if (message == 0x007E) Dispatcher.BeginInvoke(new Action(Position)); // WM_DISPLAYCHANGE
         if (message == 0x0312)
         {
