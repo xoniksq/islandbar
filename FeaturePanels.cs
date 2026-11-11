@@ -334,6 +334,7 @@ sealed partial class IslandWindow
         _volumeSlider.ValueChanged+=(_,_)=>{if(_panelUpdating)return;try{int value=(int)Math.Round(_volumeSlider.Value);AudioService.SetVolume(value);_volumeNumber.Text=$"{value}%";}catch(Exception ex){PanelError(ex.Message);}};row.Children.Add(_volumeSlider);column.Children.Add(row);
         var heading=LeftLabel("УСТРОЙСТВО ВЫВОДА",10,Secondary);heading.Margin=new Thickness(0,20,0,8);column.Children.Add(heading);_outputs=new StackPanel();column.Children.Add(PanelControls.Scroller(_outputs,180));
         var mixer=PanelControls.Button(LeftLabel("Микшер приложений",12),"Микшер приложений");mixer.Margin=new Thickness(0,8,0,0);PanelControls.FinishTile(mixer);mixer.Click+=(_,_)=>OpenMixer();column.Children.Add(mixer);
+        var bluetooth=PanelControls.Button("Bluetooth","Управление Bluetooth");bluetooth.Margin=new Thickness(0,4,0,0);bluetooth.Click+=(_,_)=>OpenBluetooth();column.Children.Add(bluetooth);
         _outputKey="";OpenCard("sound",column);UpdateSoundPanel();
     }
     void UpdateSoundPanel()

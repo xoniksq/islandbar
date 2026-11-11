@@ -157,6 +157,10 @@ sealed partial class IslandWindow : Window
             Collapse();
         };
         _dock.Children.Add(language);
+        var bluetooth = MakeButton(Glyph(BluetoothGlyph, 17), "Bluetooth", 32);
+        _featureTriggers["bluetooth"] = bluetooth;
+        bluetooth.Click += (_, _) => OpenBluetooth();
+        _dock.Children.Add(bluetooth);
         var quick = MakeButton(Glyph("\uE767", 18), "Громкость и устройство вывода", 34);
         _featureTriggers["sound"]=quick;
         quick.Click += (_, _) => OpenSound();
@@ -644,14 +648,14 @@ sealed partial class IslandWindow : Window
             _outside.Stop();
             if(_mouseHook!=0){Native.UnhookWindowsHookEx(_mouseHook);_mouseHook=0;}
         }
-        bool takeEscape=needed&&_storageWindow is null&&!_trayContextOpening&&!NativeTrayMenuOpen;
+        bool takeEscape=needed&&_storageWindow is null&&!_trayContextOpening&&!NativeTrayMenuOpen&&!_bluetoothDialogOpen;
         if(takeEscape&&!_escapeRegistered)_escapeRegistered=Native.RegisterHotKey(_handle,2,0x4000,0x1B);
         if(!takeEscape&&_escapeRegistered){Native.UnregisterHotKey(_handle,2);_escapeRegistered=false;}
     }
     void CloseMenus(){foreach(var menu in _openMenus.Keys.ToArray())menu.IsOpen=false;}
     void OutsideClick(int x,int y)
     {
-        if (_startMenu?.ConfirmingPower == true) return;
+        if (_startMenu?.ConfirmingPower == true || _bluetoothDialogOpen) return;
         if (_storageWindow is { } storage && storage.ContainsScreenPoint(x,y)) return;
         if(InsideFeature(x,y)||InsidePreview(x,y)||InsideStartMenu(x,y)||InsideNativeTrayMenu(x,y))return;
         foreach(var window in _openMenus.Values)
@@ -663,7 +667,7 @@ sealed partial class IslandWindow : Window
             (!_featureTriggers.TryGetValue("storage",out var storageTrigger)||!PointInside(storageTrigger,x,y))?openStorage:null;
         if(_openMenus.Count>0||_featurePopup.IsOpen||!inside||startToClose is not null||storageToClose is not null)
             Dispatcher.BeginInvoke(()=>{
-                if (_startMenu?.ConfirmingPower == true) return;
+                if (_startMenu?.ConfirmingPower == true || _bluetoothDialogOpen) return;
                 CloseMenus();if(!trigger)CloseFeature();
                 startToClose?.Dismiss();
                 storageToClose?.DismissOnOutside();
