@@ -22,7 +22,9 @@ sealed class MusicService
     public static string? ProviderName(string source)
     {
         if(source.Contains("spotify",StringComparison.OrdinalIgnoreCase))return Spotify;
-        return source.Contains("yandex",StringComparison.OrdinalIgnoreCase)&&source.Contains("music",StringComparison.OrdinalIgnoreCase)
+        return (source.Contains("yandex",StringComparison.OrdinalIgnoreCase)&&source.Contains("music",StringComparison.OrdinalIgnoreCase))
+            || source.Contains("Яндекс Музыка",StringComparison.OrdinalIgnoreCase)
+            || source.Contains("Яндекс.Музыка",StringComparison.OrdinalIgnoreCase)
             ?YandexMusic:null;
     }
 

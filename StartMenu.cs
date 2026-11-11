@@ -48,7 +48,7 @@ sealed partial class IslandWindow
         UpdatePanelMarker();
         ToolTipService.SetIsEnabled(_startButton,false);
         menu.Deactivated+=(_,_)=>Dispatcher.BeginInvoke(()=>{
-            if(ReferenceEquals(_startMenu,menu)&&!menu.IsActive&&Native.GetForegroundWindow()!=_handle)menu.Dismiss();
+            if(ReferenceEquals(_startMenu,menu)&&!menu.IsActive&&!menu.ConfirmingPower&&Native.GetForegroundWindow()!=_handle)menu.Dismiss();
         },DispatcherPriority.Background);
         menu.Closed+=(_,_)=>{
             if(ReferenceEquals(_startMenu,menu))_startMenu=null;

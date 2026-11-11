@@ -33,7 +33,7 @@ sealed partial class IslandWindow
     Image? _musicCover;
     Slider? _musicPosition,_volumeSlider;
     Slider? _musicVolume;
-    TextBlock? _musicVolumeText;
+    TextBlock? _musicVolumeText,_musicVolumeLabel;
     string? _musicVolumeKey;
     TextBlock? _volumeNumber,_volumeName,_muteLabel;
     StackPanel? _outputs;
@@ -186,7 +186,10 @@ sealed partial class IslandWindow
         var next=PanelControls.Button(Glyph("\uE893",20),"Следующий трек",44,true);next.Width=52;next.Click+=async(_,_)=>await MusicCommand("next");controls.Children.Add(next);column.Children.Add(controls);
         _musicPreviousButton=previous;_musicPlayButton=play;_musicNextButton=next;
         previous.ToolTip=PanelControls.Hint("Предыдущий трек");play.ToolTip=PanelControls.Hint("Пауза или воспроизведение");next.ToolTip=PanelControls.Hint("Следующий трек");
-        var volume=new DockPanel {Margin=new Thickness(0,4,0,5)};
+        _musicVolumeLabel=LeftLabel("Общая громкость Windows",11,Secondary);
+        _musicVolumeLabel.Margin=new Thickness(0,4,0,0);
+        column.Children.Add(_musicVolumeLabel);
+        var volume=new DockPanel {Margin=new Thickness(0,0,0,5)};
         var speaker=Glyph("\uE767",16);speaker.Margin=new Thickness(0,0,8,0);
         DockPanel.SetDock(speaker,Dock.Left);volume.Children.Add(speaker);
         _musicVolumeText=LeftLabel("—",11,Secondary);_musicVolumeText.Width=38;
@@ -194,9 +197,16 @@ sealed partial class IslandWindow
         _musicVolume=new Slider {Minimum=0,Maximum=100,Height=25,IsMoveToPointEnabled=true,Template=PanelControls.Slider,Foreground=Accent,IsEnabled=false};
         System.Windows.Automation.AutomationProperties.SetName(_musicVolume,"Громкость музыкального приложения");
         _musicVolume.ValueChanged+=(_,_)=>{
-            if(_panelUpdating||_musicVolumeKey is not { } key)return;
+            if(_panelUpdating||!_musicVolume.IsEnabled)return;
             int value=(int)Math.Round(_musicVolume.Value);
-            try{AppMixer.SetVolume(key,value);_musicVolumeText.Text=$"{value}%";}
+            try{
+                if(_musicVolumeKey is null)AudioService.SetVolume(value);
+                else if(!AppMixer.SetVolume(_musicVolumeKey,value)){
+                    PanelError("Аудиосессия приложения завершилась.");
+                    return;
+                }
+                _musicVolumeText.Text=$"{value}%";
+            }
             catch(Exception ex){Program.Log("music volume: "+ex.Message);PanelError("Не удалось изменить громкость плеера.");}
         };
         volume.Children.Add(_musicVolume);column.Children.Add(volume);
@@ -268,29 +278,50 @@ sealed partial class IslandWindow
         try{
             if(!_musicPosition!.IsMouseCaptureWithin){_musicPosition.Maximum=Math.Max(1,track?.Duration??1);_musicPosition.Value=track?.Position??0;}
             _musicPosition.IsEnabled=track?.CanSeek==true;
-            UpdateMusicVolume(track?.Provider);
+            UpdateMusicVolume(track);
         }
         finally{_panelUpdating=false;}
         _musicTime!.Text=track is {Duration:>0}?TrackTime(track.Position)+"  /  "+TrackTime(track.Duration):"—";
     }
-    static bool MatchesMusicVolume(string? provider,string key) => provider switch {
-        MusicService.Spotify => key.Equals("Spotify",StringComparison.OrdinalIgnoreCase),
-        MusicService.YandexMusic => key.ToLowerInvariant() is "яндекс музыка" or "yandexmusic" or "yandex music",
-        _ => false
-    };
-    void UpdateMusicVolume(string? provider)
+    static string? MusicAudioKey(MusicTrack? track, MixerApp[] apps)
+    {
+        if(track is null)return null;
+        string source=track.Source;
+        string normalized=source.EndsWith(".exe",StringComparison.OrdinalIgnoreCase)
+            ?Path.GetFileNameWithoutExtension(source):source.Split('!')[0];
+        var exact=apps.FirstOrDefault(app=>normalized.Equals(app.Key,StringComparison.OrdinalIgnoreCase));
+        if(exact is not null&&exact.Key!="system")return exact.Key;
+        if(track.Provider==MusicService.Spotify)
+            return apps.FirstOrDefault(app=>app.Key.Equals("Spotify",StringComparison.OrdinalIgnoreCase))?.Key;
+        if(track.Provider==MusicService.YandexMusic)
+            return apps.FirstOrDefault(app=>app.Key.ToLowerInvariant() is
+                "яндекс музыка" or "яндекс.музыка" or "yandexmusic" or "yandex music" or "yandex.music")?.Key;
+        string prefix=normalized.Split('.')[0];
+        return prefix.ToLowerInvariant() is "chrome" or "msedge" or "firefox" or "brave" or "opera" or "browser"
+            ?apps.FirstOrDefault(app=>app.Key.Equals(prefix,StringComparison.OrdinalIgnoreCase))?.Key:null;
+    }
+    void UpdateMusicVolume(MusicTrack? track)
     {
         if(_musicVolume is null||_musicVolume.IsMouseCaptureWithin)return;
-        MixerApp? app=null;
-        try{if(provider is not null)app=AppMixer.Read().FirstOrDefault(item=>MatchesMusicVolume(provider,item.Key));}
-        catch(Exception ex){Program.Log("music volume state: "+ex.Message);}
-        _musicVolumeKey=app?.Key;
-        _musicVolume.IsEnabled=app is not null;
-        _musicVolumeText!.Text=app is null?"—":$"{app.Volume}%";
-        if(app is not null)_musicVolume.Value=app.Volume;
-        var hint=app is null?"Громкость доступна, когда Spotify или Яндекс.Музыка создаст аудиосессию.":"Громкость · "+provider;
-        _musicVolume.ToolTip=PanelControls.Hint(hint);
-        ToolTipService.SetShowOnDisabled(_musicVolume,true);
+        _musicVolumeKey=null;
+        try{
+            var apps=track is null?[]:AppMixer.Read();
+            _musicVolumeKey=MusicAudioKey(track,apps);
+            var app=apps.FirstOrDefault(item=>item.Key==_musicVolumeKey);
+            int volume=app?.Volume??AudioService.Read().Volume;
+            string label=app is null?"Общая громкость Windows":"Громкость · "+(track?.Provider??app.Name);
+            _musicVolumeLabel!.Text=label;
+            System.Windows.Automation.AutomationProperties.SetName(_musicVolume,label);
+            _musicVolumeText!.Text=$"{volume}%";
+            _musicVolume.Value=volume;
+            _musicVolume.IsEnabled=true;
+        }
+        catch(Exception ex){
+            _musicVolume.IsEnabled=false;
+            _musicVolumeLabel!.Text="Устройство вывода недоступно";
+            _musicVolumeText!.Text="—";
+            Program.Log("music volume state: "+ex.Message);
+        }
     }
     void OpenSound()
     {

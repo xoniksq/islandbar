@@ -22,7 +22,16 @@ static class AppMixer
         string Name(string key)=>key.ToLowerInvariant() switch{"system"=>"Системные звуки","chrome"=>"Google Chrome","msedge"=>"Microsoft Edge","steam" or "steamwebhelper"=>"Steam","browser"=>"Яндекс Браузер",_=>key};
         return result.Select(p=>new MixerApp(p.Key,Name(p.Key),(int)Math.Round(p.Value.Average(v=>v.Volume)*100),p.Value.All(v=>v.Muted))).OrderBy(a=>a.Name).ToArray();
     }
-    public static void SetVolume(string key,int volume)=>Each((name,s)=>{if(name.Equals(key,StringComparison.OrdinalIgnoreCase))s.SimpleAudioVolume.Volume=Math.Clamp(volume,0,100)/100f;});
+    public static bool SetVolume(string key,int volume)
+    {
+        bool changed=false;
+        Each((name,session)=>{
+            if(!name.Equals(key,StringComparison.OrdinalIgnoreCase))return;
+            session.SimpleAudioVolume.Volume=Math.Clamp(volume,0,100)/100f;
+            changed=true;
+        });
+        return changed;
+    }
     public static void SetMute(string key,bool muted)=>Each((name,s)=>{if(name.Equals(key,StringComparison.OrdinalIgnoreCase))s.SimpleAudioVolume.Mute=muted;});
     public static bool Probe()
     {

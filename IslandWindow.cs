@@ -663,6 +663,7 @@ sealed partial class IslandWindow : Window
             (!_featureTriggers.TryGetValue("storage",out var storageTrigger)||!PointInside(storageTrigger,x,y))?openStorage:null;
         if(_openMenus.Count>0||_featurePopup.IsOpen||!inside||startToClose is not null||storageToClose is not null)
             Dispatcher.BeginInvoke(()=>{
+                if (_startMenu?.ConfirmingPower == true) return;
                 CloseMenus();if(!trigger)CloseFeature();
                 startToClose?.Dismiss();
                 storageToClose?.DismissOnOutside();

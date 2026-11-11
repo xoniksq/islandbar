@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 using Microsoft.Win32.SafeHandles;
 
 namespace IslandBar;
@@ -11,7 +12,12 @@ namespace IslandBar;
 sealed partial class SearchWindow
 {
     enum PowerAction { Lock, Sleep, ShutDown, Restart }
-    public bool ConfirmingPower { get; private set; }
+    readonly Border _powerConfirmation = new() {
+        Visibility = Visibility.Collapsed,
+        CornerRadius = new CornerRadius(20),
+        Background = new SolidColorBrush(Color.FromArgb(190, 0, 0, 0))
+    };
+    public bool ConfirmingPower => _powerConfirmation.Visibility == Visibility.Visible;
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -69,7 +75,10 @@ sealed partial class SearchWindow
             (PowerAction.ShutDown, "Завершение работы"), (PowerAction.Restart, "Перезагрузка")
         }) {
             var item = new MenuItem { Header = text };
-            item.Click += (_, _) => RunPower(action, text);
+            item.Click += (_, _) => {
+                if (action is PowerAction.ShutDown or PowerAction.Restart) ShowPowerConfirmation(action, text);
+                else RunPower(action);
+            };
             menu.Items.Add(item);
         }
         button.ContextMenu = menu;
@@ -77,15 +86,53 @@ sealed partial class SearchWindow
         return button;
     }
 
-    void RunPower(PowerAction action, string title)
+    void ShowPowerConfirmation(PowerAction action, string title)
+    {
+        var content = new StackPanel { Width = 310 };
+        content.Children.Add(new TextBlock {
+            Text = action == PowerAction.ShutDown ? "Завершить работу компьютера?" : "Перезагрузить компьютер?",
+            Foreground = Brushes.White, FontSize = 17, FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14)
+        });
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = PanelControls.Button("Отмена", "Отмена", 34, true);
+        cancel.Click += (_, _) => HidePowerConfirmation();
+        var confirm = PanelControls.Button(title, title, 34, true);
+        confirm.Margin = new Thickness(8, 0, 0, 0);
+        PanelControls.FinishTile(confirm);
+        confirm.Click += (_, _) => {
+            if (!ConfirmingPower) return;
+            HidePowerConfirmation();
+            RunPower(action);
+        };
+        buttons.Children.Add(cancel);
+        buttons.Children.Add(confirm);
+        content.Children.Add(buttons);
+        var card = PanelControls.Frame(content, new Thickness(18));
+        card.HorizontalAlignment = HorizontalAlignment.Center;
+        card.VerticalAlignment = VerticalAlignment.Center;
+        _powerConfirmation.Child = card;
+        _powerConfirmation.Visibility = Visibility.Visible;
+        _frame.IsEnabled = false;
+        Dispatcher.BeginInvoke(() => {
+            if (!ConfirmingPower || _closing) return;
+            Activate();
+            cancel.Focus();
+        }, System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    void HidePowerConfirmation()
+    {
+        _powerConfirmation.Visibility = Visibility.Collapsed;
+        _powerConfirmation.Child = null;
+        _frame.IsEnabled = true;
+        FocusSearch();
+    }
+
+    void RunPower(PowerAction action)
     {
         try {
             if (action is PowerAction.ShutDown or PowerAction.Restart) {
-                ConfirmingPower = true;
-                try {
-                    if (MessageBox.Show(this, action == PowerAction.ShutDown ? "Завершить работу компьютера?" : "Перезагрузить компьютер?",
-                        title, MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes) return;
-                } finally { ConfirmingPower = false; }
                 var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "shutdown.exe")) { UseShellExecute = false, CreateNoWindow = true };
                 start.ArgumentList.Add(action == PowerAction.ShutDown ? "/s" : "/r");
                 start.ArgumentList.Add("/t");

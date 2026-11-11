@@ -49,7 +49,10 @@ sealed partial class SearchWindow:Window
         }
         var root=new DockPanel();
         _frame=PanelControls.Frame(root,new Thickness(22));
-        Content=_frame;
+        var surface=new Grid();
+        surface.Children.Add(_frame);
+        if(start is not null)surface.Children.Add(_powerConfirmation);
+        Content=surface;
         var header=Header(start is null?"Поиск":"Пуск");
         DockPanel.SetDock(header,Dock.Top);root.Children.Add(header);
         var fieldContent=new DockPanel {Height=44};
@@ -234,6 +237,7 @@ sealed partial class SearchWindow:Window
     {
         if(_closing)return;
         if(immediate){Close();return;}
+        if(ConfirmingPower){HidePowerConfirmation();return;}
         if(_dismissing)return;
         _dismissing=true;
         _frame.IsHitTestVisible=false;

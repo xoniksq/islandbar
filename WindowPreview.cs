@@ -25,38 +25,44 @@ sealed class WindowPreview:Window
     long _revealStarted;
     double _previewDpi;
     public int ThumbnailCount=>_thumbnails.Count;
-    public WindowPreview(nint[] windows,Action<nint> activate,bool inspect)
+    public IReadOnlyList<nint> Windows { get; }
+    public WindowPreview(nint[] windows,Action<nint> activate,Action<nint> requestClose,bool inspect)
     {
+        Windows=windows;
         Title="IslandBar — окна";Width=windows.Length*CardStride+16;Height=CardHeight+16;Background=PanelControls.Surface;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;ShowInTaskbar=inspect;ShowActivated=false;Topmost=true;
         var panel=new StackPanel {Orientation=Orientation.Horizontal,Margin=new Thickness(8)};
         Content=panel;
         foreach(var source in windows){
             var header=new DockPanel {Height=29,VerticalAlignment=VerticalAlignment.Top};
-            if(panel.Children.Count==windows.Length-1){
-                var cross=new System.Windows.Shapes.Path {
-                    Data=Geometry.Parse("M 1 1 L 9 9 M 9 1 L 1 9"),
-                    Stroke=PanelControls.Silver,StrokeThickness=1.4,
-                    StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round
-                };
-                var dismiss=PanelControls.Button(cross,"Закрыть превью",24,center:true);
-                dismiss.Width=24;dismiss.Padding=new Thickness(0);dismiss.Margin=new Thickness(3,3,5,2);
-                dismiss.Focusable=false;
-                dismiss.Click+=(_,e)=>{e.Handled=true;Close();};
-                DockPanel.SetDock(dismiss,Dock.Right);header.Children.Add(dismiss);
-            }
+            var cross=new System.Windows.Shapes.Path {
+                Data=Geometry.Parse("M 1 1 L 9 9 M 9 1 L 1 9"),
+                Stroke=PanelControls.Silver,StrokeThickness=1.4,
+                StrokeStartLineCap=PenLineCap.Round,StrokeEndLineCap=PenLineCap.Round
+            };
+            var dismiss=PanelControls.Button(cross,"Закрыть окно",24,center:true);
+            dismiss.Width=24;dismiss.Padding=new Thickness(0);dismiss.Margin=new Thickness(3,3,5,2);
+            dismiss.Focusable=false;
+            dismiss.Click+=(_,_)=>requestClose(source);
+            DockPanel.SetDock(dismiss,Dock.Right);header.Children.Add(dismiss);
             var title=new TextBlock {Text=Native.Title(source),Foreground=Brushes.White,FontSize=12,
-                TextTrimming=TextTrimming.CharacterEllipsis,Margin=new Thickness(8,0,4,0),VerticalAlignment=VerticalAlignment.Center};
+                TextTrimming=TextTrimming.CharacterEllipsis,Margin=new Thickness(8,0,4,0),
+                VerticalAlignment=VerticalAlignment.Center,IsHitTestVisible=false};
             header.Children.Add(title);
+            var activationArea=new Border {Background=Brushes.Transparent};
+            activationArea.MouseLeftButtonUp+=(_,_)=>activate(source);
+            var content=new Grid();
+            content.Children.Add(activationArea);
+            content.Children.Add(header);
             var cell=new Border {
                 Width=CardWidth,Height=CardHeight,Margin=new Thickness(3,0,3,0),CornerRadius=new CornerRadius(CardRadius),
                 Background=PanelControls.Shell,
-                Cursor=Cursors.Hand,Child=header
+                Cursor=Cursors.Hand,Child=content
             };
             cell.MouseEnter+=(_,_)=>cell.Background=PanelControls.Tile;
             cell.MouseLeave+=(_,_)=>cell.Background=PanelControls.Shell;
             int index=panel.Children.Count;
             title.Loaded+=(_,_)=>ChromeMotion.Reveal(title,index);
-            cell.MouseLeftButtonUp+=(_,_)=>activate(source);panel.Children.Add(cell);
+            panel.Children.Add(cell);
         }
         SourceInitialized+=(_,_)=>{if(!inspect){nint hwnd=new WindowInteropHelper(this).Handle;Native.SetWindowLong(hwnd,-20,Native.GetWindowLong(hwnd,-20)|0x08000080);}};
         Loaded+=(_,_)=>{
@@ -140,7 +146,15 @@ sealed partial class IslandWindow
         if(_closing||!_expanded){ClosePreview();_previewTimer.Stop();return;}
         if(_fileDragging||_iconReordering||_featurePopup.IsOpen||_startMenu is not null||_openMenus.Count>0){ClosePreview();return;}
         if(!Native.GetCursorPos(out var cursor))return;
-        if(InsidePreview(cursor.X,cursor.Y)){_previewLeave=DateTime.MinValue;return;}
+        if(_windowPreview is { } shown && shown.Contains(cursor.X,cursor.Y)){
+            _previewLeave=DateTime.MinValue;
+            var remaining=shown.Windows.Where(w=>Native.IsWindow(w)&&Native.IsWindowVisible(w)).ToArray();
+            if(remaining.Length!=shown.Windows.Count){
+                if(remaining.Length>0&&_hoverTile is { } tileWithPreview)ShowPreview(tileWithPreview,remaining,shown.Left);
+                else ClosePreview();
+            }
+            return;
+        }
         var hovered=PointInside(_scroll,cursor.X,cursor.Y)?_tiles.Values.FirstOrDefault(t=>PointInside(t.Button,cursor.X,cursor.Y)):null;
         if(hovered is null){if(_windowPreview is not null){if(_previewLeave==DateTime.MinValue)_previewLeave=DateTime.UtcNow;if(DateTime.UtcNow-_previewLeave<TimeSpan.FromMilliseconds(250))return;}ClosePreview();_hoverTile=null;return;}
         _previewLeave=DateTime.MinValue;
@@ -148,10 +162,16 @@ sealed partial class IslandWindow
         var tile=hovered;
         if(_previewKey==tile.App.Key||DateTime.UtcNow-_hoverSince<TimeSpan.FromMilliseconds(550))return;
         var windows=tile.App.Windows.Where(Native.IsWindow).Take(4).ToArray();if(windows.Length==0)return;
+        ShowPreview(tile,windows);
+    }
+    void ShowPreview(AppTile tile,nint[] windows,double? previousLeft=null)
+    {
         ClosePreview();_previewKey=tile.App.Key;
-        var preview=new WindowPreview(windows,w=>{Collapse();Native.Activate(w);},_preview||_inspect);_windowPreview=preview;
+        var preview=new WindowPreview(windows,w=>{Collapse();Native.Activate(w);},
+            w=>{if(Native.IsWindow(w)&&!Native.PostMessage(w,0x0010,0,0))Program.Log("preview: close request was rejected");},
+            _preview||_inspect);_windowPreview=preview;
         double dpi=VisualTreeHelper.GetDpi(this).DpiScaleX;var anchor=tile.Button.PointToScreen(new Point(tile.Button.ActualWidth/2,0));
-        preview.Left=Math.Clamp(anchor.X/dpi-preview.Width/2,8,Math.Max(8,SystemParameters.PrimaryScreenWidth-preview.Width-8));preview.Top=_hitRect.Top/dpi-preview.Height-10;
+        preview.Left=Math.Clamp(previousLeft??anchor.X/dpi-preview.Width/2,8,Math.Max(8,SystemParameters.PrimaryScreenWidth-preview.Width-8));preview.Top=_hitRect.Top/dpi-preview.Height-10;
         preview.Closed+=(_,_)=>{if(ReferenceEquals(_windowPreview,preview))_windowPreview=null;};preview.Show();
     }
 }
