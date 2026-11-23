@@ -37,7 +37,7 @@ sealed class MusicService
     static Session? SelectSession(IEnumerable<Session> sessions,Session? current,string? displayed)
     {
         return sessions.Where(s=>ProviderName(s.SourceAppUserModelId) is not null)
-            .OrderByDescending(s=>s.GetPlaybackInfo().PlaybackStatus==GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+            .OrderByDescending(s=>s.GetPlaybackInfo()?.PlaybackStatus==GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
             .ThenByDescending(s=>string.Equals(s.SourceAppUserModelId,current?.SourceAppUserModelId,StringComparison.OrdinalIgnoreCase))
             .ThenByDescending(s=>string.Equals(s.SourceAppUserModelId,displayed,StringComparison.OrdinalIgnoreCase))
             .FirstOrDefault()??current;
@@ -54,7 +54,7 @@ sealed class MusicService
     {
         if(session is null){_shownSession=null;Current=null;return;}
         var props=await session.TryGetMediaPropertiesAsync();
-        if(string.IsNullOrWhiteSpace(props.Title)){_shownSession=null;Current=null;return;}
+        if(props is null||string.IsNullOrWhiteSpace(props.Title)){_shownSession=null;Current=null;return;}
         string key=session.SourceAppUserModelId+"|"+props.Artist+"|"+props.Title;
         if(key!=_coverKey){
             _cover=null;_coverKey=key;
@@ -68,12 +68,12 @@ sealed class MusicService
             }catch(Exception ex){Program.Log("cover: "+ex.Message);}
         }
         var playback=session.GetPlaybackInfo();var timeline=session.GetTimelineProperties();
-        bool playing=playback.PlaybackStatus==GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-        double duration=Math.Max(0,(timeline.EndTime-timeline.StartTime).TotalSeconds);
-        double position=(timeline.Position-timeline.StartTime).TotalSeconds;
-        if(playing&&timeline.LastUpdatedTime.Year>2000)position+=(DateTimeOffset.Now-timeline.LastUpdatedTime).TotalSeconds;
-        var controls=playback.Controls;
-        Current=new(props.Title,props.Artist,_cover,playing,Math.Clamp(position,0,duration),duration,controls.IsPlayPauseToggleEnabled,controls.IsPreviousEnabled,controls.IsNextEnabled,controls.IsPlaybackPositionEnabled&&duration>0,session.SourceAppUserModelId);
+        bool playing=playback?.PlaybackStatus==GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+        double duration=timeline is null?0:Math.Max(0,(timeline.EndTime-timeline.StartTime).TotalSeconds);
+        double position=timeline is null?0:(timeline.Position-timeline.StartTime).TotalSeconds;
+        if(playing&&timeline is not null&&timeline.LastUpdatedTime.Year>2000)position+=(DateTimeOffset.Now-timeline.LastUpdatedTime).TotalSeconds;
+        var controls=playback?.Controls;
+        Current=new(props.Title,props.Artist,_cover,playing,Math.Clamp(position,0,duration),duration,controls?.IsPlayPauseToggleEnabled==true,controls?.IsPreviousEnabled==true,controls?.IsNextEnabled==true,controls?.IsPlaybackPositionEnabled==true&&duration>0,session.SourceAppUserModelId);
         _shownSession=session;
     }
     public async Task<bool> CommandAsync(string command,double position=0)
@@ -84,7 +84,8 @@ sealed class MusicService
                 "toggle"=>await session.TryTogglePlayPauseAsync(),
                 "previous"=>await session.TrySkipPreviousAsync(),
                 "next"=>await session.TrySkipNextAsync(),
-                "seek"=>await session.TryChangePlaybackPositionAsync(TimeSpan.FromSeconds(Math.Max(0,position)).Ticks),_=>false};
+                "seek" when double.IsFinite(position) && session.GetTimelineProperties() is {} timeline && timeline.EndTime>timeline.StartTime
+                    =>await session.TryChangePlaybackPositionAsync((timeline.StartTime+TimeSpan.FromSeconds(Math.Clamp(position,0,(timeline.EndTime-timeline.StartTime).TotalSeconds))).Ticks),_=>false};
         }catch(Exception ex){Program.Log("music command: "+ex);return false;}
     }
 }

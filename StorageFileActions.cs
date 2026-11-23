@@ -117,6 +117,11 @@ sealed partial class StorageWindow
         if (_busy) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         var modifiers = Keyboard.Modifiers;
+        if (_overlay is null && modifiers == ModifierKeys.Alt && key >= Key.D1 && key < Key.D1 + SectionNames.Length) {
+            ShowView(SectionNames[key-Key.D1]);
+            e.Handled = true;
+            return;
+        }
         if (key == Key.F5 && modifiers == ModifierKeys.None ||
             key == Key.R && modifiers == ModifierKeys.Control && Keyboard.FocusedElement is not TextBoxBase) {
             e.Handled = true;

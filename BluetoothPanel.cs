@@ -75,11 +75,48 @@ sealed partial class IslandWindow
             };
         }
 
-        void ShowDevices(BluetoothAccessory[] devices, string message)
+        string? selected = null;
+        bool confirm = false;
+        async Task Act(BluetoothAccessory device, bool remove)
+        {
+            if (_bluetoothOperation || lifetime is not {} session) return;
+            _bluetoothOperation = true;
+            PanelError(remove ? "Удаляю сопряжение…" : device.Connected ? "Отключаю…" : "Подключаю…");
+            list.IsEnabled = false;
+            ShowRadio(observedState);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(session.Token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(15));
+            try {
+                if (remove) {
+                    var info = await DeviceInformation.CreateFromIdAsync(device.DeviceId, [], DeviceInformationKind.AssociationEndpoint).AsTask(timeout.Token);
+                    var result = await info.Pairing.UnpairAsync().AsTask(timeout.Token);
+                    if (result.Status is not (DeviceUnpairingResultStatus.Unpaired or DeviceUnpairingResultStatus.AlreadyUnpaired))
+                        throw new InvalidOperationException("Windows не удалось удалить сопряжение.");
+                } else {
+                    if (!await Task.Run(() => BluetoothAudio.Request(device.Key, !device.Connected)))
+                        throw new InvalidOperationException("Драйвер не принял команду. Открой настройки Bluetooth в Windows.");
+                    while (true) {
+                        var devices = await BluetoothService.GetPairedAsync(timeout.Token);
+                        if (devices.Any(d => d.Key == device.Key && d.Connected != device.Connected)) break;
+                        await Task.Delay(500, timeout.Token);
+                    }
+                }
+                if (!session.IsCancellationRequested) PanelError(remove ? "Сопряжение удалено." : device.Connected ? "Устройство отключено." : "Устройство подключено.");
+            } catch (Exception ex) {
+                if (!session.IsCancellationRequested) PanelError(ex is OperationCanceledException ? "Устройство не ответило. Проверь питание и расстояние." : ex.Message);
+            } finally {
+                _bluetoothOperation = false;
+                confirm = false;
+                list.IsEnabled = true;
+                if (!session.IsCancellationRequested) { ShowRadio(observedState); ShowDevices(shown, "", true); await Refresh(); }
+            }
+        }
+
+        void ShowDevices(BluetoothAccessory[] devices, string message, bool force = false)
         {
             empty.Text = message;
             empty.Visibility = devices.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-            if (shown.SequenceEqual(devices)) return;
+            if (!force && shown.SequenceEqual(devices)) return;
             shown = devices;
             list.Children.Clear();
             foreach (var device in devices) {
@@ -94,10 +131,36 @@ sealed partial class IslandWindow
                 name.ToolTip = PanelControls.Hint(device.Name);
                 text.Children.Add(name);
                 text.Children.Add(LeftLabel(device.Connected ? "Подключено" : "Сопряжено", 11, Secondary));
+                var arrow = LeftLabel(selected == device.Key ? "⌃" : "⌄", 14, Secondary);
+                DockPanel.SetDock(arrow, Dock.Right);
+                row.Children.Add(arrow);
                 row.Children.Add(text);
-                var tile = PanelControls.Well(row, new Thickness(8, 6, 8, 6), 10);
+                var tile = PanelControls.Button(row, device.Name + " · Действия", 44);
+                tile.Click += (_, _) => {
+                    selected = selected == device.Key ? null : device.Key;
+                    confirm = false;
+                    ShowDevices(shown, message, true);
+                };
                 tile.Margin = new Thickness(0, 0, 0, 4);
                 list.Children.Add(tile);
+                if (selected != device.Key) continue;
+                string action = device.Connected ? "Отключить" : "Подключить";
+                var connection = PanelControls.Button(action, action + " " + device.Name, 32);
+                connection.Click += async (_, _) => await Act(device, false);
+                list.Children.Add(connection);
+                string label = confirm ? "Подтвердить удаление сопряжения" : "Удалить сопряжение…";
+                var forget = PanelControls.Button(label, label, 32);
+                forget.Click += async (_, _) => {
+                    if (confirm) { await Act(device, true); return; }
+                    confirm = true;
+                    ShowDevices(shown, message, true);
+                };
+                list.Children.Add(forget);
+                if (confirm) {
+                    var cancel = PanelControls.Button("Отмена", "Отменить удаление", 30);
+                    cancel.Click += (_, _) => { confirm = false; ShowDevices(shown, message, true); };
+                    list.Children.Add(cancel);
+                }
             }
         }
 

@@ -4,7 +4,7 @@ using Windows.Devices.Radios;
 
 namespace IslandBar;
 
-sealed record BluetoothAccessory(string Name, bool Connected);
+sealed record BluetoothAccessory(string Key, string DeviceId, string Name, bool Connected);
 
 static class BluetoothService
 {
@@ -31,7 +31,7 @@ static class BluetoothService
         var devices = await Task.WhenAll(classic, lowEnergy);
         return devices.SelectMany(group => group)
             .GroupBy(DeviceKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new BluetoothAccessory(
+            .Select(group => new BluetoothAccessory(group.Key, group.First().Id,
                 group.Select(device => device.Name).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? "Устройство Bluetooth",
                 group.Any(device => device.Properties.TryGetValue(Connected, out var connected) && connected is true)))
             .OrderByDescending(device => device.Connected)

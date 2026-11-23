@@ -14,6 +14,7 @@ sealed partial class IslandWindow
         _overflowButton.Visibility = Visibility.Collapsed;
         _overflowButton.Click += (_, _) => {
             var column = CardColumn(270);
+            column.Children.Add(CardTitle("Ещё функции"));
             foreach (var module in _overflowModules) {
                 var button = PanelControls.Button(module.Label, module.Label);
                 button.Click += (_, _) => module.Open();

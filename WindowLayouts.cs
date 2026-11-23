@@ -34,6 +34,7 @@ static class WindowLayouts
     public static void Apply(nint[] windows,int layout)
     {
         int required=layout==5?3:layout;if(windows.Length!=required)throw new InvalidOperationException($"Для этой раскладки выбери {required} окна");
+        if(windows.Any(window=>!Native.IsWindow(window)))throw new InvalidOperationException("Одно из выбранных окон уже закрыто. Открой раскладки снова.");
         var boxes=Calculate(WorkArea(windows[0]),layout);
         for(int i=0;i<windows.Length;i++){
             nint window=windows[i];if(!Native.IsWindow(window))continue;
@@ -83,7 +84,7 @@ sealed partial class IslandWindow
     void OpenLayouts()
     {
         var column=CardColumn();column.Children.Add(CardTitle("Раскладка окон"));
-        var hint=LeftLabel("Выбери окна и раскладку",12,Secondary);hint.Margin=new Thickness(0,0,0,8);column.Children.Add(hint);
+        var hint=LeftLabel("Выбери 2, 3 или 4 окна — доступные раскладки подсветятся",12,Secondary);hint.Margin=new Thickness(0,0,0,8);column.Children.Add(hint);
         var list=new StackPanel();var candidates=new List<(CheckBox Check,nint Window)>();nint foreground=Native.GetForegroundWindow();
         var windows=_tiles.Values.Where(t=>!t.App.Key.Contains("Koala",StringComparison.OrdinalIgnoreCase)).SelectMany(t=>t.App.Windows.Select(w=>(Window:w,Name:Native.Title(w)))).Where(w=>Native.IsWindowVisible(w.Window)).OrderByDescending(w=>w.Window==foreground).DistinctBy(w=>w.Window);
         foreach(var item in windows){var text=LeftLabel(item.Name,12);var check=new CheckBox {Content=text,Tag=item.Window,IsChecked=candidates.Count<2,Margin=new Thickness(0,7,0,7),Template=PanelControls.CheckBox,ToolTip=PanelControls.Hint(item.Name)};System.Windows.Automation.AutomationProperties.SetName(check,item.Name);list.Children.Add(check);candidates.Add((check,item.Window));}
@@ -99,7 +100,13 @@ sealed partial class IslandWindow
             }
             content.Children.Add(badge);content.Children.Add(LeftLabel(choice.Item1,11));
             var button=PanelControls.Button(content,choice.Item1,37,true);
-            button.Margin=new Thickness(3);PanelControls.FinishTile(button);button.IsEnabled=candidates.Count>0;
+            button.Margin=new Thickness(3);PanelControls.FinishTile(button);int needed=choice.Item2==5?3:choice.Item2;
+            void UpdateChoice() => button.IsEnabled=candidates.Count(c=>c.Check.IsChecked==true)==needed;
+            foreach(var candidate in candidates){
+                candidate.Check.Checked+=(_,_)=>UpdateChoice();
+                candidate.Check.Unchecked+=(_,_)=>UpdateChoice();
+            }
+            UpdateChoice();
             button.Click+=(_,_)=>{
                 var selected=candidates.Where(c=>c.Check.IsChecked==true).Select(c=>c.Window).ToArray();int required=choice.Item2==5?3:choice.Item2;
                 if(selected.Length!=required){PanelError($"Для этой раскладки выбери {required} окна");return;}

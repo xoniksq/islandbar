@@ -20,6 +20,7 @@ sealed partial class StorageWindow : Window
     readonly Grid _pageLayer = new();
     readonly ContentControl _page = new();
     readonly TextBlock _status = Text("", 12, PanelControls.Secondary);
+    static readonly string[] SectionNames = ["Файлы", "Карта", "Разбор", "Журнал", "Очередь", "Проекты"];
     readonly Dictionary<string, Button> _sections = [];
     readonly Button _desktop = ActionButton("Скрыть значки");
     ContextMenu? _openFolderMenu;
@@ -89,8 +90,8 @@ sealed partial class StorageWindow : Window
         var nav = new DockPanel { Margin = new Thickness(0, 0, 0, 9) };
         AddDock(nav, Command("↻", "Обновить · F5", Refresh), Dock.Right);
         var sections = new WrapPanel();
-        foreach (string name in new[] { "Файлы", "Карта", "Разбор", "Журнал", "Очередь", "Проекты" }) {
-            var tab = Command(name, name, () => ShowView(name));
+        foreach (string name in SectionNames) {
+            var tab = Command(name, $"{name} · Alt+{_sections.Count+1}", () => ShowView(name));
             _sections.Add(name, tab);
             sections.Children.Add(tab);
         }

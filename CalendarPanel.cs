@@ -21,7 +21,7 @@ sealed partial class IslandWindow
     {
         _islandEvents.Enqueue(new(DateTime.Now,text,open));
         while(_islandEvents.Count>40)_islandEvents.Dequeue();
-        if(_featureKind=="calendar")RenderCalendarEvents();
+        if(_featureKind=="calendar")RenderCalendar();
     }
 
     void OpenCalendar()
@@ -65,7 +65,7 @@ sealed partial class IslandWindow
     {
         if((delta<0&&_calendarMonth==DateTime.MinValue)||(delta>0&&_calendarMonth.Year==9999&&_calendarMonth.Month==12))return;
         _calendarMonth=_calendarMonth.AddMonths(delta);
-        _calendarDay=_calendarMonth;
+        _calendarDay=_calendarMonth.AddDays(Math.Min(_calendarDay.Day,DateTime.DaysInMonth(_calendarMonth.Year,_calendarMonth.Month))-1);
         RenderCalendar();
         ChromeMotion.Reveal(_calendarDays!);
     }
@@ -82,7 +82,13 @@ sealed partial class IslandWindow
             var date=_calendarMonth.AddDays(day-1);
             var label=Label(day.ToString(),12);
             if(date==DateTime.Today)label.FontWeight=FontWeights.Bold;
-            var button=PanelControls.Button(label,date.ToString("D",RussianCalendar),30,true);
+            int events=_islandEvents.Count(item=>item.Time.Date==date);
+            var cell=new Grid();
+            cell.Children.Add(label);
+            if(events>0)cell.Children.Add(new Border {Width=4,Height=4,CornerRadius=new CornerRadius(2),Background=PanelControls.Silver,
+                VerticalAlignment=VerticalAlignment.Bottom,HorizontalAlignment=HorizontalAlignment.Center});
+            string hint=date.ToString("D",RussianCalendar);
+            var button=PanelControls.Button(cell,events==0?hint:$"{hint} · Событий: {events}",30,true);
             button.Padding=new Thickness(0);button.Margin=new Thickness(1);
             if(date==_calendarDay)button.Background=TodayFill;
             else if(date==DateTime.Today)button.Background=PanelControls.Tile;

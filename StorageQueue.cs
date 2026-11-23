@@ -126,6 +126,7 @@ sealed class StorageQueue(StorageTransfers transfers)
                         if (choice == QueueChoice.KeepBoth) plan = await Task.Run(() => StorageTransfers.KeepBoth(plan));
                         else plan = plan with { Replacement = conflict.Replacement };
                     }
+                    if (job.Stop) { countItem = false; break; }
                     var result = await Task.Run(() => transfers.Execute(plan));
                     if (result.Completed) {
                         job.Done++;

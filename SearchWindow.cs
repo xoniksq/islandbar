@@ -191,7 +191,8 @@ sealed partial class SearchWindow:Window
             entries=_start.Pinned.Select(app=>new LaunchEntry(app.Name,app.LaunchPath!,true,app))
                 .Concat(index).DistinctBy(entry=>entry.Name,StringComparer.CurrentCultureIgnoreCase);
         else entries=_actions.Concat(entries);
-        var matches=entries.Where(e=>e.Name.Contains(query,StringComparison.CurrentCultureIgnoreCase)).OrderByDescending(e=>query.Length==0?e.Pinned:e.Name.StartsWith(query,StringComparison.CurrentCultureIgnoreCase)).ThenBy(e=>e.Name).Take(12).ToArray();
+        var words=query.Split((char[]?)null,StringSplitOptions.RemoveEmptyEntries);
+        var matches=entries.Where(e=>!string.IsNullOrWhiteSpace(e.Name)&&words.All(word=>e.Name.Contains(word,StringComparison.CurrentCultureIgnoreCase))).OrderByDescending(e=>query.Length==0?e.Pinned:e.Name.StartsWith(query,StringComparison.CurrentCultureIgnoreCase)).ThenBy(e=>e.Name).Take(12).ToArray();
         var icons=await Task.Run(()=>matches.Select(e=>e.Favorite?.Icon??(e.Path.EndsWith(".lnk",StringComparison.OrdinalIgnoreCase)?Native.Icon(e.Path):null)).ToArray());
         if(revision!=_revision||!IsLoaded||_closing||_dismissing)return;_results.Items.Clear();
         for(int i=0;i<matches.Length;i++){
@@ -256,7 +257,7 @@ sealed partial class SearchWindow:Window
         string pins=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),@"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar");
         foreach(var folder in new[]{pins,Environment.GetFolderPath(Environment.SpecialFolder.Programs),Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms)}){
             if(!Directory.Exists(folder))continue;
-            try{foreach(string path in Directory.EnumerateFiles(folder,"*.lnk",SearchOption.AllDirectories)){
+            try{foreach(string path in Directory.EnumerateFiles(folder,"*.lnk",new EnumerationOptions { RecurseSubdirectories=true, IgnoreInaccessible=true, AttributesToSkip=FileAttributes.ReparsePoint })){
                 string name=Path.GetFileNameWithoutExtension(path);if(name.Contains("uninstall",StringComparison.OrdinalIgnoreCase)||name.StartsWith("Удал",StringComparison.OrdinalIgnoreCase)||name.Contains("деинстал",StringComparison.OrdinalIgnoreCase))continue;
                 entries.Add(new(name,path,folder==pins));
             }}catch(Exception ex){Program.Log("search index: "+ex.Message);}
@@ -264,7 +265,7 @@ sealed partial class SearchWindow:Window
         dynamic? shell=null;
         try {
             shell=Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);dynamic folder=shell!.NameSpace("shell:AppsFolder");dynamic items=folder.Items();
-            try{for(int i=0;i<items.Count;i++){dynamic item=items.Item(i);try{string name=item.Name;string path=item.Path;if(!string.IsNullOrWhiteSpace(name)&&!string.IsNullOrWhiteSpace(path))entries.Add(new(name,"shell:AppsFolder\\"+path));}finally{Marshal.ReleaseComObject(item);}}}
+            try{for(int i=0;i<items.Count;i++){dynamic item=items.Item(i);try{string name=item.Name;string path=item.Path;if(!string.IsNullOrWhiteSpace(name)&&!string.IsNullOrWhiteSpace(path))entries.Add(new(name,Path.IsPathFullyQualified(path)?path:"shell:AppsFolder\\"+path));}finally{Marshal.ReleaseComObject(item);}}}
             finally{Marshal.ReleaseComObject(items);Marshal.ReleaseComObject(folder);}
         }catch(Exception ex){Program.Log("apps index: "+ex.Message);}
         finally{if(shell is not null)Marshal.ReleaseComObject(shell);}

@@ -345,6 +345,12 @@ sealed partial class StorageWindow
         ConnectDragSource(pane);
         root.Children.Add(pane.Items);
         var frame = PanelControls.Well(root, new Thickness(6), 11);
+        frame.PreviewMouseDown += (_, e) => {
+            if (e.ChangedButton is not (MouseButton.XButton1 or MouseButton.XButton2)) return;
+            e.Handled = true;
+            SetActive(pane);
+            Step(pane, e.ChangedButton == MouseButton.XButton1 ? -1 : 1);
+        };
         frame.PreviewMouseLeftButtonDown += (_, _) => SetActive(pane);
         frame.GotKeyboardFocus += (_, _) => SetActive(pane);
         frame.SizeChanged += (_, e) => UpdateParentLink(pane, e.NewSize.Width);

@@ -56,13 +56,6 @@ static class Program
             if (EventWaitHandle.TryOpenExisting(CollapseEvent, out var signal)) using (signal) signal.Set();
             return 0;
         }
-        using var mutex = new Mutex(true, @"Local\IslandBar.SingleInstance", out bool first);
-        if (!first)
-        {
-            string name = args.Contains("--files") ? StorageEvent : ExpandEvent;
-            if (EventWaitHandle.TryOpenExisting(name, out var signal)) using (signal) signal.Set();
-            return 0;
-        }
         if (args.Contains("--diagnostics"))
         {
             var apps = new Catalog().GetApps();
@@ -72,7 +65,14 @@ static class Program
             }, new JsonSerializerOptions { WriteIndented = true }));
             return 0;
         }
-        bool preview = args.Contains("--preview") || args.Contains("--animation-check");
+        using var mutex = new Mutex(true, @"Local\IslandBar.SingleInstance", out bool first);
+        if (!first)
+        {
+            string name = args.Contains("--files") ? StorageEvent : ExpandEvent;
+            if (EventWaitHandle.TryOpenExisting(name, out var signal)) using (signal) signal.Set();
+            return 0;
+        }
+        bool preview = args.Contains("--panel-check") || args.Contains("--preview") || args.Contains("--animation-check");
         try
         {
             if (!preview)
@@ -87,11 +87,12 @@ static class Program
                 if (args.Contains("--enable-startup")) SetAutostart(true);
             }
             var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-            app.DispatcherUnhandledException += (_, e) => { Log(e.Exception.ToString()); Restore(); e.Handled = true; app.Shutdown(1); };
-            AppDomain.CurrentDomain.UnhandledException += (_, e) => { Log(e.ExceptionObject.ToString() ?? "fatal"); Restore(); };
+            app.DispatcherUnhandledException += (_, e) => { Log(e.Exception.ToString()); if(!preview)Restore(); e.Handled = true; app.Shutdown(1); };
+            AppDomain.CurrentDomain.UnhandledException += (_, e) => { Log(e.ExceptionObject.ToString() ?? "fatal"); if(!preview)Restore(); };
             var window = new IslandWindow(preview,args.Contains("--inspect"));
             if(args.Contains("--return"))window.Loaded+=(_,_)=>window.Expand();
             if(args.Contains("--files"))window.Loaded+=(_,_)=>window.OpenStorage();
+            if(args.Contains("--panel-check")) window.Loaded += async (_, _) => await window.CheckPanelsAsync();
             if(args.Contains("--animation-check")) window.Loaded += async (_, _) => await window.CheckAnimationAsync();
             app.Exit += (_, _) => { if (!preview) Restore(); };
             Log("start " + (preview ? "preview" : "active"));
